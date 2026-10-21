@@ -1,0 +1,105 @@
+name: mlops
+on:
+  push: { branches: [main] }
+  pull_request:
+  workflow_dispatch:
+
+env:
+  REGION: us-central1
+  SERVICE: driver-cancel-risk
+  IMAGE: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/driver-cancel-risk/api
+  MODEL_BUCKET: ${{ vars.GCP_PROJECT_ID && format('gs://{0}-driver-cancel-risk-models', vars.GCP_PROJECT_ID) || '' }}
+  CANARY_PERCENT: "10"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13", cache: pip }
+      - run: pip install -r requirements-dev.txt
+      - run: python -m src.data && python -m src.train && python -m src.gate   # champion needed by API tests
+      - run: pytest -q
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform -chdir=terraform fmt -check && terraform -chdir=terraform init -backend=false && terraform -chdir=terraform validate
+
+  train-and-gate:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions: { contents: read, id-token: write }
+    outputs:
+      promoted: ${{ steps.gate.outputs.promoted }}
+      version: ${{ steps.gate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13", cache: pip }
+      - run: pip install -r requirements-dev.txt
+      - id: auth
+        if: vars.GCP_PROJECT_ID != ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+        if: vars.GCP_PROJECT_ID != ''
+      - name: Pull current champion from GCS (if any)
+        if: vars.GCP_PROJECT_ID != ''
+        run: |
+          mkdir -p registry
+          gcloud storage cp "$MODEL_BUCKET/champion.json" registry/champion.json || echo "no champion yet"
+      - run: python -m src.data      # replace with real data extract (e.g. BigQuery) in production
+      - run: python -m src.train
+      - id: gate
+        run: python -m src.gate --min-delta 0.005
+        env:
+          MODEL_BUCKET: ${{ vars.GCP_PROJECT_ID != '' && env.MODEL_BUCKET || '' }}
+      - uses: actions/upload-artifact@v4
+        with: { name: registry, path: registry/ }
+
+  build-and-canary:
+    needs: train-and-gate
+    if: needs.train-and-gate.outputs.promoted == 'true' && vars.GCP_PROJECT_ID != ''
+    runs-on: ubuntu-latest
+    permissions: { contents: read, id-token: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: registry, path: registry/ }
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
+      - run: |
+          docker build -t "$IMAGE:${GITHUB_SHA}" .
+          docker push "$IMAGE:${GITHUB_SHA}"
+      - name: Deploy new revision with no traffic, then shift canary %
+        run: |
+          TAG="m-${{ needs.train-and-gate.outputs.version }}"
+          gcloud run deploy "$SERVICE" --region "$REGION" --image "$IMAGE:${GITHUB_SHA}" \
+            --no-traffic --tag "$TAG" --set-env-vars "APP_VERSION=${GITHUB_SHA::7}"
+          NEW=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.latestCreatedRevisionName)')
+          gcloud run services update-traffic "$SERVICE" --region "$REGION" --to-revisions "$NEW=$CANARY_PERCENT"
+      - name: Smoke test canary URL
+        run: |
+          URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --format=json \
+            | python3 -c "import json,sys;print([t['url'] for t in json.load(sys.stdin)['status']['traffic'] if t.get('tag','').startswith('m-')][-1])")
+          TOKEN=$(gcloud auth print-identity-token)
+          curl -fsS -H "Authorization: Bearer $TOKEN" "$URL/health"
+
+  promote-full:
+    needs: build-and-canary
+    runs-on: ubuntu-latest
+    environment: production   # add required reviewers in repo settings for a manual approval
+    permissions: { contents: read, id-token: write }
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud run services update-traffic "$SERVICE" --region "$REGION" --to-latest
