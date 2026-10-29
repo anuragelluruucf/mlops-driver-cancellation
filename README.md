@@ -72,18 +72,15 @@ Test split: last 30% of 60,000 synthetic orders (18,000), positive rate 1.10%.
 
 Why PR-AUC: positives are ~1% of orders, and PR-AUC reflects rare-class performance better than ROC-AUC.
 
-## Design decisions
-- **Temporal split** (as in the research code) avoids training on the future.
-- **Gate margin (0.005)** prevents churn from noise-level "improvements".
-- **No-traffic tagged revision → smoke test → 10% canary → manual 100%** keeps rollback to one `update-traffic` command.
-- Terraform ignores image/traffic drift because CI owns revisions after the first apply.
+## Why it's built this way
+- **Trained on the past, tested on the future.** The model learns from older orders and is scored on newer ones, the same way it would be used in real life.
+- **A new model only goes live if it's clearly better.** It has to beat the current model by a set margin, so small random changes don't keep swapping models.
+- **New versions roll out gradually.** A new version is checked first, then gets 10% of traffic, and only goes to everyone once it looks healthy. Undoing a bad release takes one command.
+- **The pipeline owns releases.** After the first setup, GitHub Actions handles every new version, so the infrastructure code doesn't fight it.
 
-## Deploying to GCP
-1. Create a GCP project and a Workload Identity Federation pool/provider for this repo.
-2. In GitHub, set the repo variable `GCP_PROJECT_ID` and the secrets `GCP_WIF_PROVIDER` and `GCP_DEPLOY_SA`.
-3. Run `terraform init && terraform apply` in `terraform/` to create Cloud Run, Artifact Registry, the model bucket and the service account.
-4. Push to `main`: CI trains, gates, builds the image and rolls out a 10% canary.
+## How it runs on Google Cloud
+It's live today on Cloud Run (link at the top). Every push to `main` runs the tests, retrains the model and compares it with the current one. If the new model wins, it ships automatically. GitHub signs in to Google Cloud without any stored passwords or keys. To run your own copy, create a GCP project, add the three GitHub settings the workflow uses, and run `terraform apply` in `terraform/`.
 
-## Roadmap
-- Remote Terraform state in a GCS backend
-- Train on real data via a BigQuery extract instead of the synthetic generator
+## What's next
+- Store the infrastructure state in the cloud so it isn't tied to one machine.
+- Train on real order data from BigQuery instead of the synthetic sample.

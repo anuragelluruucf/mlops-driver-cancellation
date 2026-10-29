@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import shap
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from src import drift
@@ -70,6 +71,11 @@ def _frame(orders):
 
 def _tier(p):  # risk tiers from the research's policy simulation
     return "high" if p >= 0.7 else "medium" if p >= 0.4 else "low"
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health")
