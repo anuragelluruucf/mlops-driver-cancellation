@@ -20,6 +20,7 @@ jobs:
         with: { python-version: "3.13", cache: pip }
       - run: pip install -r requirements-dev.txt
       - run: python -m src.data && python -m src.train && python -m src.gate   # champion needed by API tests
+        env: { MODEL_BUCKET: "" }   # unit tests stay offline; never touch the real registry
       - run: pytest -q
       - uses: hashicorp/setup-terraform@v3
       - run: terraform -chdir=terraform fmt -check && terraform -chdir=terraform init -backend=false && terraform -chdir=terraform validate
