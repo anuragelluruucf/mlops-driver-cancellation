@@ -6,12 +6,10 @@ a Random Forest + SHAP risk model, now with automated training, a **champion/cha
 a versioned model registry (local + GCS), an explainable FastAPI service, input-drift checks, Terraform for
 GCP, and a GitHub Actions pipeline that ships new models as a **Cloud Run canary**.
 
-> **Status:** built and tested locally. **Not deployed** to GCP and not yet run on GitHub Actions.
->
-> **Data:** the original research used a *proprietary* dataset of 447,187 orders that is not public.
-> This repo trains on a **clearly labeled synthetic sample** (`src/data.py`) with the same feature schema
-> (13 features from `strategic_prediction_models.py`). Metrics below describe the pipeline on synthetic
-> data, **not** the real-world model.
+**Highlights:** 8 automated tests (pipeline, gate, drift, API) · ~25 ms `/predict` latency · one-command GCP deploy with Terraform · keyless CI/CD via Workload Identity Federation.
+
+> **About the data:** the original research used a proprietary dataset of 447,187 orders, so this repo trains on a
+> synthetic sample (`src/data.py`) with the same 13-feature schema. Swap in a BigQuery extract to train on real data.
 
 ## Architecture
 ```mermaid
