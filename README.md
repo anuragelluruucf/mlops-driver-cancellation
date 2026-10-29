@@ -8,6 +8,13 @@ GCP, and a GitHub Actions pipeline that ships new models as a **Cloud Run canary
 
 **Highlights:** 8 automated tests (pipeline, gate, drift, API) · ~25 ms `/predict` latency · one-command GCP deploy with Terraform · keyless CI/CD via Workload Identity Federation.
 
+**Live demo:** https://driver-cancel-risk-ty5y6wq2hq-uc.a.run.app ([health](https://driver-cancel-risk-ty5y6wq2hq-uc.a.run.app/health) · [interactive API docs](https://driver-cancel-risk-ty5y6wq2hq-uc.a.run.app/docs)), running on Cloud Run (scales to zero, so the first request may take a few seconds).
+
+```bash
+curl -X POST https://driver-cancel-risk-ty5y6wq2hq-uc.a.run.app/predict -H 'content-type: application/json' \
+  -d '{"lifetime_order_count":40,"bike_issue_rate":0.6,"post_pickup_rate":0.8,"total_distance":9.5,"first_mile_distance":2.5,"last_mile_distance":7.0,"session_time":300,"hour":19,"time_to_accept":1.0,"time_to_pickup":10}'
+```
+
 > **About the data:** the original research used a proprietary dataset of 447,187 orders, so this repo trains on a
 > synthetic sample (`src/data.py`) with the same 13-feature schema. Swap in a BigQuery extract to train on real data.
 
