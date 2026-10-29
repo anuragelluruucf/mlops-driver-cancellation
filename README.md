@@ -73,6 +73,12 @@ Why PR-AUC: positives are ~1% of orders, and PR-AUC reflects rare-class performa
 - **No-traffic tagged revision → smoke test → 10% canary → manual 100%** keeps rollback to one `update-traffic` command.
 - Terraform ignores image/traffic drift because CI owns revisions after the first apply.
 
-## Not done yet
-GitHub push, GCP deploy (set repo var `GCP_PROJECT_ID`, secrets `GCP_WIF_PROVIDER` + `GCP_DEPLOY_SA`, then `terraform apply`),
-a remote Terraform state backend, and real data via a BigQuery extract instead of the synthetic generator.
+## Deploying to GCP
+1. Create a GCP project and a Workload Identity Federation pool/provider for this repo.
+2. In GitHub, set the repo variable `GCP_PROJECT_ID` and the secrets `GCP_WIF_PROVIDER` and `GCP_DEPLOY_SA`.
+3. Run `terraform init && terraform apply` in `terraform/` to create Cloud Run, Artifact Registry, the model bucket and the service account.
+4. Push to `main`: CI trains, gates, builds the image and rolls out a 10% canary.
+
+## Roadmap
+- Remote Terraform state in a GCS backend
+- Train on real data via a BigQuery extract instead of the synthetic generator
